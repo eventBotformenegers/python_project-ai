@@ -1,5 +1,5 @@
 # Для запуска локально: uvicorn main:app --reload
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, Any
 from db import init_db, SessionLocal, Message
@@ -19,30 +19,30 @@ ASSISTANT_ID = "asst_obkTcxOabucx8H50lbfQd99t"
 
 import asyncio
 
-async def ask_openai_assistant(user_message, thread_id=None):
+def ask_openai_assistant(user_message, thread_id=None):
     if not thread_id:
-        thread = await openai.beta.threads.acreate()
+        thread = openai.beta.threads.create()
         thread_id = thread.id
 
-    await openai.beta.threads.messages.create(
+    openai.beta.threads.messages.create(
         thread_id=thread_id,
         role="user",
         content=user_message
     )
 
-    run = await openai.beta.threads.runs.create(
+    run = openai.beta.threads.runs.create(
         thread_id=thread_id,
         assistant_id=ASSISTANT_ID
     )
 
     # Ждём завершения run (polling)
     while True:
-        run_status = await openai.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+        run_status = openai.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
         if run_status.status == "completed":
             break
-        await asyncio.sleep(1)
+        asyncio.sleep(1)
 
-    messages = await openai.beta.threads.messages.list(thread_id=thread_id)
+    messages = openai.beta.threads.messages.list(thread_id=thread_id)
     answer = messages.data[0].content[0].text.value
     return answer, thread_id
 
@@ -53,12 +53,16 @@ class ManyChatMessage(BaseModel):
     raw: Dict[str, Any] = {}
 
 @app.post("/manychat-webhook")
-async def manychat_webhook(payload: ManyChatMessage):
+async def manychat_webhook(payload: ManyChatMessage, background_tasks: BackgroundTasks):
     db: Session = SessionLocal()
-    # Ищем последний thread_id для пользователя
     last_msg = db.query(Message).filter(Message.user_id == payload.user_id).order_by(Message.id.desc()).first()
     thread_id = last_msg.thread_id if last_msg else None
-    ai_response, thread_id = await ask_openai_assistant(payload.message, thread_id)
+
+    loop = asyncio.get_event_loop()
+    ai_response, thread_id = await loop.run_in_executor(
+        None, ask_openai_assistant, payload.message, thread_id
+    )
+
     msg = Message(user_id=payload.user_id, message=payload.message, response=ai_response, thread_id=thread_id)
     db.add(msg)
     db.commit()
