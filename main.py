@@ -53,11 +53,11 @@ class ManyChatMessage(BaseModel):
     message: str
     raw: Dict[str, Any] = {}
 
+FIXED_THREAD_ID = "thread_57U8d7bSWhewmT61dOgvvxNe"  # подставьте ваш thread_id
+
 @app.post("/manychat-webhook")
 async def manychat_webhook(payload: ManyChatMessage, background_tasks: BackgroundTasks):
-    db: Session = SessionLocal()
-    last_msg = db.query(Message).filter(Message.user_id == payload.user_id).order_by(Message.id.desc()).first()
-    thread_id = last_msg.thread_id if last_msg else None
+    thread_id = FIXED_THREAD_ID
 
     loop = asyncio.get_event_loop()
     ai_response, thread_id = await loop.run_in_executor(
@@ -65,6 +65,7 @@ async def manychat_webhook(payload: ManyChatMessage, background_tasks: Backgroun
     )
 
     msg = Message(user_id=payload.user_id, message=payload.message, response=ai_response, thread_id=thread_id)
+    db: Session = SessionLocal()
     db.add(msg)
     db.commit()
     db.refresh(msg)
