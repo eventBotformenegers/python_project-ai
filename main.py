@@ -18,6 +18,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 ASSISTANT_ID = "asst_obkTcxOabucx8H50lbfQd99t"
 
 import asyncio
+import time
 
 def ask_openai_assistant(user_message, thread_id=None):
     if not thread_id:
@@ -40,7 +41,7 @@ def ask_openai_assistant(user_message, thread_id=None):
         run_status = openai.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
         if run_status.status == "completed":
             break
-        asyncio.sleep(1)
+        time.sleep(1)
 
     messages = openai.beta.threads.messages.list(thread_id=thread_id)
     answer = messages.data[0].content[0].text.value
