@@ -15,15 +15,36 @@ def on_startup():
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-async def ask_openai(prompt: str) -> str:
-    try:
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"[OpenAI error: {e}]"
+ASSISTANT_ID = "asst_obkTcxOabucx8H50lbfQd99t"
+
+import asyncio
+
+async def ask_openai_assistant(user_message, thread_id=None):
+    if not thread_id:
+        thread = await openai.beta.threads.acreate()
+        thread_id = thread.id
+
+    await openai.beta.threads.messages.create(
+        thread_id=thread_id,
+        role="user",
+        content=user_message
+    )
+
+    run = await openai.beta.threads.runs.create(
+        thread_id=thread_id,
+        assistant_id=ASSISTANT_ID
+    )
+
+    # Ждём завершения run (polling)
+    while True:
+        run_status = await openai.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+        if run_status.status == "completed":
+            break
+        await asyncio.sleep(1)
+
+    messages = await openai.beta.threads.messages.list(thread_id=thread_id)
+    answer = messages.data[0].content[0].text.value
+    return answer, thread_id
 
 class ManyChatMessage(BaseModel):
     # Примерная структура, уточним позже по документации ManyChat
@@ -34,8 +55,11 @@ class ManyChatMessage(BaseModel):
 @app.post("/manychat-webhook")
 async def manychat_webhook(payload: ManyChatMessage):
     db: Session = SessionLocal()
-    ai_response = await ask_openai(payload.message)
-    msg = Message(user_id=payload.user_id, message=payload.message, response=ai_response)
+    # Ищем последний thread_id для пользователя
+    last_msg = db.query(Message).filter(Message.user_id == payload.user_id).order_by(Message.id.desc()).first()
+    thread_id = last_msg.thread_id if last_msg else None
+    ai_response, thread_id = await ask_openai_assistant(payload.message, thread_id)
+    msg = Message(user_id=payload.user_id, message=payload.message, response=ai_response, thread_id=thread_id)
     db.add(msg)
     db.commit()
     db.refresh(msg)

@@ -16,6 +16,7 @@ class Message(Base):
     message = Column(Text)
     response = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    thread_id = Column(String, index=True, nullable=True)
 
 def init_db():
     Base.metadata.create_all(bind=engine) 
